@@ -1,0 +1,2 @@
+# SpartaApplication
+Sample Sparta application
