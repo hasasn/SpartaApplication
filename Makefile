@@ -31,5 +31,7 @@ test: build
 provision: get
 	go run application.go provision --s3Bucket $S3_BUCKET
 
-describe: get
-	go run application.go describe --out ./graph.html
+describe: build
+	S3_TEST_BUCKET="" SNS_TEST_TOPIC="" DYNAMO_TEST_STREAM="" go run application.go describe --out ./graph.html
+
+
