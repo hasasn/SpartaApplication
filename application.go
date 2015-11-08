@@ -20,7 +20,7 @@ func paramVal(keyName string, defaultValue string) string {
 	return value
 }
 
-var S3_BUCKET = paramVal("S3_TEST_BUCKET", "MyS3Bucket")
+var S3_BUCKET = paramVal("S3_TEST_BUCKET", "arn:aws:s3:::MyS3Bucket")
 var SNS_TOPIC = paramVal("SNS_TEST_TOPIC", "arn:aws:sns:us-west-2:123412341234:mySNSTopic")
 var DYNAMO_EVENT_SOURCE = paramVal("DYNAMO_TEST_STREAM", "arn:aws:dynamodb:us-west-2:123412341234:table/myTableName/stream/2015-10-22T15:05:13.779")
 
@@ -52,15 +52,6 @@ func spartaLambdaData() []*sparta.LambdaAWSInfo {
 			"s3:PutObject",
 		},
 		Resource: S3_BUCKET,
-	})
-	// Add privileges to support the EventSourceMapping below
-	iamRole.Privileges = append(iamRole.Privileges, sparta.IAMRolePrivilege{
-		Actions: []string{"dynamodb:DescribeStream",
-			"dynamodb:GetRecords",
-			"dynamodb:GetShardIterator",
-			"dynamodb:ListStreams",
-		},
-		Resource: DYNAMO_EVENT_SOURCE,
 	})
 
 	var lambdaFunctions []*sparta.LambdaAWSInfo
