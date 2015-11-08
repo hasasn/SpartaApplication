@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/lambda"
@@ -27,17 +26,11 @@ var DYNAMO_EVENT_SOURCE = paramVal("DYNAMO_TEST_STREAM", "arn:aws:dynamodb:us-we
 ////////////////////////////////////////////////////////////////////////////////
 // Echo handler
 //
-func echoEvent(event *sparta.LambdaEvent, context *sparta.LambdaContext, w *http.ResponseWriter, logger *logrus.Logger) {
+func echoEvent(event *json.RawMessage, context *sparta.LambdaContext, w *http.ResponseWriter, logger *logrus.Logger) {
 	logger.WithFields(logrus.Fields{
 		"RequestID": context.AWSRequestId,
-	}).Info("Request received :)")
-
-	eventData, err := json.Marshal(*event)
-	if err != nil {
-		logger.Error("Failed to marshal event data: ", err.Error())
-		http.Error(*w, err.Error(), http.StatusInternalServerError)
-	}
-	logger.Info("Event data: ", string(eventData))
+		"Event" : string(*event),
+	}).Info("Request received")
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -91,6 +84,5 @@ func spartaLambdaData() []*sparta.LambdaAWSInfo {
 
 func main() {
 	stackName := "SpartaApplication"
-	fmt.Printf("Creating stack: %s", stackName)
 	sparta.Main(stackName, "This is a sample Sparta application", spartaLambdaData())
 }
