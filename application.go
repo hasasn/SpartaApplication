@@ -2,12 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"os"
+
 	"github.com/Sirupsen/logrus"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/lambda"
 	sparta "github.com/mweagle/Sparta"
-	"net/http"
-	"os"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -28,8 +29,8 @@ var DYNAMO_EVENT_SOURCE = paramVal("DYNAMO_TEST_STREAM", "arn:aws:dynamodb:us-we
 //
 func echoEvent(event *json.RawMessage, context *sparta.LambdaContext, w *http.ResponseWriter, logger *logrus.Logger) {
 	logger.WithFields(logrus.Fields{
-		"RequestID": context.AWSRequestId,
-		"Event" : string(*event),
+		"RequestID": context.AWSRequestID,
+		"Event":     string(*event),
 	}).Info("Request received")
 }
 
