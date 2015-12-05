@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/lambda"
 	sparta "github.com/mweagle/Sparta"
+	spartaSNS "github.com/mweagle/Sparta/aws/sns"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -28,13 +29,40 @@ var dynamoTestStream = paramVal("DYNAMO_TEST_STREAM", "arn:aws:dynamodb:us-west-
 ////////////////////////////////////////////////////////////////////////////////
 // Echo handler
 //
-func echoEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
+func echoS3Event(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
 	logger.WithFields(logrus.Fields{
 		"RequestID": context.AWSRequestID,
 		"Event":     string(*event),
 	}).Info("Request received")
 
-	fmt.Fprintf(w, "Hello World!")
+	fmt.Fprintf(w, string(*event))
+}
+
+func echoSNSEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
+	logger.WithFields(logrus.Fields{
+		"RequestID": context.AWSRequestID,
+	}).Info("Request received")
+
+	var lambdaEvent spartaSNS.Event
+	err := json.Unmarshal([]byte(*event), &lambdaEvent)
+	if err != nil {
+		logger.Error("Failed to unmarshal event data: ", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	for _, eachRecord := range lambdaEvent.Records {
+		logger.WithFields(logrus.Fields{
+			"Subject": eachRecord.Sns.Subject,
+			"Message": eachRecord.Sns.Message,
+		}).Info("SNS Event")
+	}
+}
+func echoDynamoDBEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
+	logger.WithFields(logrus.Fields{
+		"RequestID": context.AWSRequestID,
+		"Event":     string(*event),
+	}).Info("Request received")
+
+	fmt.Fprintf(w, string(*event))
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -42,42 +70,38 @@ func echoEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.Res
 //
 func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
 
-	// Provision an IAM::Role as part of this application
-	var iamRole = sparta.IAMRoleDefinition{}
-	iamRole.Privileges = append(iamRole.Privileges, sparta.IAMRolePrivilege{
-		Actions: []string{"s3:GetObject",
-			"s3:PutObject",
-		},
-		Resource: s3Bucket,
-	})
 	var lambdaFunctions []*sparta.LambdaAWSInfo
 
-	lambdaFn := sparta.NewLambda(iamRole, echoEvent, nil)
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoS3Event, nil)
 	apiGatewayResource, _ := api.NewResource("/hello/world/test", lambdaFn)
 	apiGatewayResource.NewMethod("GET")
 
-	// //////////////////////////////////////////////////////////////////////////////
-	// // S3 configuration
-	// //
+	//////////////////////////////////////////////////////////////////////////////
+	// S3 configuration
+	//
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.S3Permission{
 		BasePermission: sparta.BasePermission{
 			SourceArn: s3Bucket,
 		},
 		Events: []string{"s3:ObjectCreated:*", "s3:ObjectRemoved:*"},
 	})
+	lambdaFunctions = append(lambdaFunctions, lambdaFn)
 
-	// //////////////////////////////////////////////////////////////////////////////
-	// // SNS configuration
-	// //
+	//////////////////////////////////////////////////////////////////////////////
+	// SNS configuration
+	//
+	lambdaFn = sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSNSEvent, nil)
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.SNSPermission{
 		BasePermission: sparta.BasePermission{
 			SourceArn: snsTopic,
 		},
 	})
+	lambdaFunctions = append(lambdaFunctions, lambdaFn)
 
-	// //////////////////////////////////////////////////////////////////////////////
-	// // Dynamo configuration
-	// //
+	//////////////////////////////////////////////////////////////////////////////
+	// Dynamo configuration
+	//
+	lambdaFn = sparta.NewLambda(sparta.IAMRoleDefinition{}, echoDynamoDBEvent, nil)
 	lambdaFn.EventSourceMappings = append(lambdaFn.EventSourceMappings, &lambda.CreateEventSourceMappingInput{
 		EventSourceArn:   aws.String(dynamoTestStream),
 		StartingPosition: aws.String("TRIM_HORIZON"),
@@ -95,5 +119,5 @@ func main() {
 	sparta.Main(stackName,
 		"Simple Sparta application",
 		spartaLambdaData(apiGateway),
-		apiGateway)
+		nil)
 }
