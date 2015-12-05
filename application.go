@@ -28,8 +28,9 @@ var snsTopic = paramVal("SNS_TEST_TOPIC", "arn:aws:sns:us-west-2:123412341234:my
 var dynamoTestStream = paramVal("DYNAMO_TEST_STREAM", "arn:aws:dynamodb:us-west-2:123412341234:table/myTableName/stream/2015-10-22T15:05:13.779")
 
 ////////////////////////////////////////////////////////////////////////////////
-// Echo handler
+// S3 handler
 //
+
 func echoS3Event(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
 	logger.WithFields(logrus.Fields{
 		"RequestID": context.AWSRequestID,
@@ -39,6 +40,23 @@ func echoS3Event(event *json.RawMessage, context *sparta.LambdaContext, w http.R
 	fmt.Fprintf(w, string(*event))
 }
 
+func appendS3Lambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoS3Event, nil)
+	apiGatewayResource, _ := api.NewResource("/hello/world/test", lambdaFn)
+	apiGatewayResource.NewMethod("GET")
+
+	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.S3Permission{
+		BasePermission: sparta.BasePermission{
+			SourceArn: s3Bucket,
+		},
+		Events: []string{"s3:ObjectCreated:*", "s3:ObjectRemoved:*"},
+	})
+	return append(lambdaFunctions, lambdaFn)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// SNS handler
+//
 func echoSNSEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
 	logger.WithFields(logrus.Fields{
 		"RequestID": context.AWSRequestID,
@@ -57,6 +75,20 @@ func echoSNSEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.
 		}).Info("SNS Event")
 	}
 }
+
+func appendSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSNSEvent, nil)
+	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.SNSPermission{
+		BasePermission: sparta.BasePermission{
+			SourceArn: snsTopic,
+		},
+	})
+	return append(lambdaFunctions, lambdaFn)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// DynamoDB handler
+//
 func echoDynamoDBEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
 	logger.WithFields(logrus.Fields{
 		"RequestID": context.AWSRequestID,
@@ -79,50 +111,26 @@ func echoDynamoDBEvent(event *json.RawMessage, context *sparta.LambdaContext, w 
 	fmt.Fprintf(w, "Done!")
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Return the *[]sparta.LambdaAWSInfo slice
-//
-func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
-
-	var lambdaFunctions []*sparta.LambdaAWSInfo
-
-	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoS3Event, nil)
-	apiGatewayResource, _ := api.NewResource("/hello/world/test", lambdaFn)
-	apiGatewayResource.NewMethod("GET")
-
-	//////////////////////////////////////////////////////////////////////////////
-	// S3 configuration
-	//
-	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.S3Permission{
-		BasePermission: sparta.BasePermission{
-			SourceArn: s3Bucket,
-		},
-		Events: []string{"s3:ObjectCreated:*", "s3:ObjectRemoved:*"},
-	})
-	lambdaFunctions = append(lambdaFunctions, lambdaFn)
-
-	//////////////////////////////////////////////////////////////////////////////
-	// SNS configuration
-	//
-	lambdaFn = sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSNSEvent, nil)
-	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.SNSPermission{
-		BasePermission: sparta.BasePermission{
-			SourceArn: snsTopic,
-		},
-	})
-	lambdaFunctions = append(lambdaFunctions, lambdaFn)
-
-	//////////////////////////////////////////////////////////////////////////////
-	// Dynamo configuration
-	//
-	lambdaFn = sparta.NewLambda(sparta.IAMRoleDefinition{}, echoDynamoDBEvent, nil)
+func appendDynamoDBLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoDynamoDBEvent, nil)
 	lambdaFn.EventSourceMappings = append(lambdaFn.EventSourceMappings, &lambda.CreateEventSourceMappingInput{
 		EventSourceArn:   aws.String(dynamoTestStream),
 		StartingPosition: aws.String("TRIM_HORIZON"),
 		BatchSize:        aws.Int64(10),
 		Enabled:          aws.Bool(true),
 	})
-	lambdaFunctions = append(lambdaFunctions, lambdaFn)
+	return append(lambdaFunctions, lambdaFn)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Return the *[]sparta.LambdaAWSInfo slice
+//
+func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
+
+	var lambdaFunctions []*sparta.LambdaAWSInfo
+	lambdaFunctions = appendS3Lambda(api, lambdaFunctions)
+	lambdaFunctions = appendSNSLambda(api, lambdaFunctions)
+	lambdaFunctions = appendDynamoDBLambda(api, lambdaFunctions)
 	return lambdaFunctions
 }
 
