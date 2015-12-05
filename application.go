@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/lambda"
 	sparta "github.com/mweagle/Sparta"
+	spartaDynamoDB "github.com/mweagle/Sparta/aws/dynamodb"
 	spartaSNS "github.com/mweagle/Sparta/aws/sns"
 )
 
@@ -62,7 +63,20 @@ func echoDynamoDBEvent(event *json.RawMessage, context *sparta.LambdaContext, w 
 		"Event":     string(*event),
 	}).Info("Request received")
 
-	fmt.Fprintf(w, string(*event))
+	var lambdaEvent spartaDynamoDB.Event
+	err := json.Unmarshal([]byte(*event), &lambdaEvent)
+	if err != nil {
+		logger.Error("Failed to unmarshal event data: ", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	for _, eachRecord := range lambdaEvent.Records {
+		logger.WithFields(logrus.Fields{
+			"Keys":     eachRecord.DynamoDB.Keys,
+			"NewImage": eachRecord.DynamoDB.NewImage,
+		}).Info("DynamoDb Event")
+	}
+
+	fmt.Fprintf(w, "Done!")
 }
 
 ////////////////////////////////////////////////////////////////////////////////
