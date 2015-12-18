@@ -32,7 +32,6 @@ var kinesisTestStream = paramVal("KINESIS_TEST_STREAM", "arn:aws:kinesis:us-west
 ////////////////////////////////////////////////////////////////////////////////
 // S3 handler
 //
-
 func echoS3Event(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
 	logger.WithFields(logrus.Fields{
 		"RequestID": context.AWSRequestID,
@@ -53,6 +52,35 @@ func appendS3Lambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []
 		},
 		Events: []string{"s3:ObjectCreated:*", "s3:ObjectRemoved:*"},
 	})
+	return append(lambdaFunctions, lambdaFn)
+}
+
+func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+
+	s3BucketResourceName := sparta.CloudFormationResourceName("S3DynamicBucket")
+	s3BucketDefinition := sparta.ArbitraryJSONObject{
+		"Type":           "AWS::S3::Bucket",
+		"DeletionPolicy": "Delete",
+		"Properties": sparta.ArbitraryJSONObject{
+			"AccessControl": "PublicRead",
+		},
+	}
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoS3Event, nil)
+	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.S3Permission{
+		BasePermission: sparta.BasePermission{
+			SourceArn: sparta.ArbitraryJSONObject{"Ref": s3BucketResourceName},
+		},
+		Events: []string{"s3:ObjectCreated:*", "s3:ObjectRemoved:*"},
+	})
+
+	lambdaFn.Decorator = func(lambdaResourceName string,
+		lambdaResourceDefinition sparta.ArbitraryJSONObject,
+		resources sparta.ArbitraryJSONObject,
+		outputs sparta.ArbitraryJSONObject,
+		logger *logrus.Logger) error {
+		resources[s3BucketResourceName] = s3BucketDefinition
+		return nil
+	}
 	return append(lambdaFunctions, lambdaFn)
 }
 
@@ -85,6 +113,32 @@ func appendSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) [
 			SourceArn: snsTopic,
 		},
 	})
+	return append(lambdaFunctions, lambdaFn)
+}
+
+func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+	snsTopicName := sparta.CloudFormationResourceName("SNSDynamicTopic")
+	snsTopicDefinition := sparta.ArbitraryJSONObject{
+		"Type": "AWS::SNS::Topic",
+		"Properties": sparta.ArbitraryJSONObject{
+			"DisplayName": "Sparta Application SNS topic",
+		},
+	}
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSNSEvent, nil)
+	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.SNSPermission{
+		BasePermission: sparta.BasePermission{
+			SourceArn: sparta.ArbitraryJSONObject{"Ref": snsTopicName},
+		},
+	})
+
+	lambdaFn.Decorator = func(lambdaResourceName string,
+		lambdaResourceDefinition sparta.ArbitraryJSONObject,
+		resources sparta.ArbitraryJSONObject,
+		outputs sparta.ArbitraryJSONObject,
+		logger *logrus.Logger) error {
+		resources[snsTopicName] = snsTopicDefinition
+		return nil
+	}
 	return append(lambdaFunctions, lambdaFn)
 }
 
@@ -164,7 +218,9 @@ func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
 
 	var lambdaFunctions []*sparta.LambdaAWSInfo
 	lambdaFunctions = appendS3Lambda(api, lambdaFunctions)
+	lambdaFunctions = appendDynamicS3BucketLambda(api, lambdaFunctions)
 	lambdaFunctions = appendSNSLambda(api, lambdaFunctions)
+	lambdaFunctions = appendDynamicSNSLambda(api, lambdaFunctions)
 	lambdaFunctions = appendDynamoDBLambda(api, lambdaFunctions)
 	lambdaFunctions = appendKinesisLambda(api, lambdaFunctions)
 	return lambdaFunctions
@@ -177,6 +233,6 @@ func main() {
 	sparta.Main(stackName,
 		"Simple Sparta application",
 		spartaLambdaData(apiGateway),
-		apiGateway,
+		nil,
 		nil)
 }
