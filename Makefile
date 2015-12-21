@@ -17,23 +17,19 @@ get: clean ensure_vendor
 	rm -rf ./src/main/vendor/github.com/Sirupsen/logrus/.git
 	git clone --depth=1 https://github.com/voxelbrain/goptions ./vendor/github.com/voxelbrain/goptions
 	rm -rf ./src/main/vendor/github.com/voxelbrain/goptions/.git
-	git clone --depth=1 https://github.com/mweagle/esc ./vendor/github.com/mweagle/esc
-	rm -rf ./src/main/vendor/github.com/mweagle/esc/.git
+	git clone --depth=1 https://github.com/mjibson/esc ./vendor/github.com/mjibson/esc
+	rm -rf ./src/main/vendor/github.com/mjibson/esc/.git
 	git clone --depth=1 https://github.com/mweagle/Sparta ./vendor/github.com/mweagle/Sparta
 	rm -rf ./src/main/vendor/github.com/mweagle/Sparta/.git
-
-update:
-	rm -rf /Users/mweagle/Documents/golang/workspace/src/SpartaApplication/vendor/github.com/mweagle/Sparta
-	mkdir /Users/mweagle/Documents/golang/workspace/src/SpartaApplication/vendor/github.com/mweagle/Sparta
-	cp -v /Users/mweagle/Documents/golang/workspace/src/Sparta/*.go /Users/mweagle/Documents/golang/workspace/src/SpartaApplication/vendor/github.com/mweagle/Sparta
-	cp -Rv /Users/mweagle/Documents/golang/workspace/src/Sparta/aws /Users/mweagle/Documents/golang/workspace/src/SpartaApplication/vendor/github.com/mweagle/Sparta
-	cp -Rv /Users/mweagle/Documents/golang/workspace/src/Sparta/resources /Users/mweagle/Documents/golang/workspace/src/SpartaApplication/vendor/github.com/mweagle/Sparta
 
 test: build
 	GO15VENDOREXPERIMENT=1 go test ./test/...
 
+delete:
+	GO15VENDOREXPERIMENT=1 go run application.go delete
+
 provision:
-	go run application.go provision --s3Bucket $(S3_BUCKET)
+	GO15VENDOREXPERIMENT=1 go run application.go provision --s3Bucket $(S3_BUCKET)
 
 describe: build
-	S3_TEST_BUCKET="" SNS_TEST_TOPIC="" DYNAMO_TEST_STREAM="" go run application.go describe --out ./graph.html
+	GO15VENDOREXPERIMENT=1 S3_TEST_BUCKET="" SNS_TEST_TOPIC="" DYNAMO_TEST_STREAM="" go run application.go describe --out ./graph.html
