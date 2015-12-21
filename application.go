@@ -233,6 +233,6 @@ func main() {
 	sparta.Main(stackName,
 		"Simple Sparta application",
 		spartaLambdaData(apiGateway),
-		nil,
+		apiGateway,
 		nil)
 }
