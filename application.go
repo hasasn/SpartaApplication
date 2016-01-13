@@ -212,6 +212,49 @@ func appendKinesisLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInf
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// SES handler
+//
+func echoSESEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
+	logger.WithFields(logrus.Fields{
+		"RequestID": context.AWSRequestID,
+		"Event":     string(*event),
+	}).Info("Request received")
+
+	fmt.Fprintf(w, string(*event))
+}
+
+func appendSESLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSESEvent, nil)
+
+	// Add a Permission s.t. the Lambda function automatically manages SES registration
+	sesPermission := sparta.SESPermission{
+		BasePermission: sparta.BasePermission{
+			SourceArn: "*",
+		},
+		InvocationType: "Event",
+	}
+	// Add some custom ReceiptRules.  Rules will be inserted in the order
+	// they're defined here.
+	sesPermission.ReceiptRules = make([]sparta.ReceiptRule, 0)
+	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules,
+		sparta.ReceiptRule{
+			Name:       "Special",
+			Recipients: []string{"somebody@mydomain.io"},
+			TLSPolicy:  "Optional",
+		})
+
+	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules,
+		sparta.ReceiptRule{
+			Name:       "Default",
+			Recipients: []string{},
+			TLSPolicy:  "Optional",
+		})
+	lambdaFn.Permissions = append(lambdaFn.Permissions, sesPermission)
+
+	return append(lambdaFunctions, lambdaFn)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Return the *[]sparta.LambdaAWSInfo slice
 //
 func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
@@ -223,6 +266,7 @@ func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
 	lambdaFunctions = appendDynamicSNSLambda(api, lambdaFunctions)
 	lambdaFunctions = appendDynamoDBLambda(api, lambdaFunctions)
 	lambdaFunctions = appendKinesisLambda(api, lambdaFunctions)
+	lambdaFunctions = appendSESLambda(api, lambdaFunctions)
 	return lambdaFunctions
 }
 
@@ -233,6 +277,6 @@ func main() {
 	sparta.Main(stackName,
 		"Simple Sparta application",
 		spartaLambdaData(apiGateway),
-		apiGateway,
+		nil,
 		nil)
 }
