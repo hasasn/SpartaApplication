@@ -12,6 +12,7 @@ import (
 	sparta "github.com/mweagle/Sparta"
 	spartaDynamoDB "github.com/mweagle/Sparta/aws/dynamodb"
 	spartaKinesis "github.com/mweagle/Sparta/aws/kinesis"
+	spartaSES "github.com/mweagle/Sparta/aws/ses"
 	spartaSNS "github.com/mweagle/Sparta/aws/sns"
 )
 
@@ -217,14 +218,34 @@ func appendKinesisLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInf
 func echoSESEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
 	logger.WithFields(logrus.Fields{
 		"RequestID": context.AWSRequestID,
-		"Event":     string(*event),
 	}).Info("Request received")
 
-	fmt.Fprintf(w, string(*event))
+	var lambdaEvent spartaSES.Event
+	err := json.Unmarshal([]byte(*event), &lambdaEvent)
+	if err != nil {
+		logger.Error("Failed to unmarshal event data: ", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+	for _, eachRecord := range lambdaEvent.Records {
+		logger.WithFields(logrus.Fields{
+			"Source":    eachRecord.SES.Mail.Source,
+			"MessageID": eachRecord.SES.Mail.MessageID,
+		}).Info("SES Event")
+	}
 }
 
 func appendSESLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
-	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSESEvent, nil)
+
+	// Setup options s.t. the lambda function has time to consume the message body
+	sesItemInfoOptions := &sparta.LambdaFunctionOptions{
+		Description: "",
+		MemorySize:  128,
+		Timeout:     10,
+	}
+	// Our lambda function will need to be able to read from the bucket, which
+	// will be handled by the S3MessageBodyBucketDecorator below
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSESEvent, sesItemInfoOptions)
 
 	// Add a Permission s.t. the Lambda function automatically manages SES registration
 	sesPermission := sparta.SESPermission{
@@ -233,15 +254,26 @@ func appendSESLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) [
 		},
 		InvocationType: "Event",
 	}
+	bodyStorage, _ := sesPermission.NewMessageBodyStorageResource("Special")
+	sesPermission.MessageBodyStorage = bodyStorage
+
 	// Add some custom ReceiptRules.  Rules will be inserted in the order
 	// they're defined here.
 	sesPermission.ReceiptRules = make([]sparta.ReceiptRule, 0)
-	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules,
-		sparta.ReceiptRule{
-			Name:       "Special",
-			Recipients: []string{"somebody@mydomain.io"},
-			TLSPolicy:  "Optional",
-		})
+
+	specialReceiptRule := sparta.ReceiptRule{
+		Name:       "Special",
+		Recipients: []string{"sombody_special@gosparta.io"},
+		TLSPolicy:  "Optional",
+	}
+
+	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules, specialReceiptRule)
+	// Then add the privilege to the Lambda function s.t. we can actually get at the data
+	// lambdaFn.RoleDefinition.Privileges = append(lambdaFn.RoleDefinition.Privileges,
+	// 	sparta.IAMRolePrivilege{
+	// 		Actions:  []string{"s3:GetObject"},
+	// 		Resource: sesPermission.MessageBodyStorage.BucketArn(),
+	// 	})
 
 	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules,
 		sparta.ReceiptRule{
