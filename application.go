@@ -17,7 +17,7 @@ import (
 	spartaKinesis "github.com/mweagle/Sparta/aws/kinesis"
 	spartaSES "github.com/mweagle/Sparta/aws/ses"
 	spartaSNS "github.com/mweagle/Sparta/aws/sns"
-	gocf "github.com/mweagle/go-cloudformation"
+	gocf "github.com/crewjam/go-cloudformation"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
