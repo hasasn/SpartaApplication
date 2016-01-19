@@ -5,15 +5,19 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 
 	"github.com/Sirupsen/logrus"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/lambda"
 	sparta "github.com/mweagle/Sparta"
 	spartaDynamoDB "github.com/mweagle/Sparta/aws/dynamodb"
 	spartaKinesis "github.com/mweagle/Sparta/aws/kinesis"
 	spartaSES "github.com/mweagle/Sparta/aws/ses"
 	spartaSNS "github.com/mweagle/Sparta/aws/sns"
+	gocf "github.com/mweagle/go-cloudformation"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -59,27 +63,23 @@ func appendS3Lambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []
 func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 
 	s3BucketResourceName := sparta.CloudFormationResourceName("S3DynamicBucket")
-	s3BucketDefinition := sparta.ArbitraryJSONObject{
-		"Type":           "AWS::S3::Bucket",
-		"DeletionPolicy": "Delete",
-		"Properties": sparta.ArbitraryJSONObject{
-			"AccessControl": "PublicRead",
-		},
-	}
+
 	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoS3Event, nil)
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.S3Permission{
 		BasePermission: sparta.BasePermission{
-			SourceArn: sparta.ArbitraryJSONObject{"Ref": s3BucketResourceName},
+			SourceArn: gocf.Ref(s3BucketResourceName),
 		},
 		Events: []string{"s3:ObjectCreated:*", "s3:ObjectRemoved:*"},
 	})
 
 	lambdaFn.Decorator = func(lambdaResourceName string,
-		lambdaResourceDefinition sparta.ArbitraryJSONObject,
-		resources sparta.ArbitraryJSONObject,
-		outputs sparta.ArbitraryJSONObject,
+		lambdaResource gocf.LambdaFunction,
+		template *gocf.Template,
 		logger *logrus.Logger) error {
-		resources[s3BucketResourceName] = s3BucketDefinition
+		cfResource := template.AddResource(s3BucketResourceName, &gocf.S3Bucket{
+			AccessControl: gocf.String("PublicRead"),
+		})
+		cfResource.DeletionPolicy = "Delete"
 		return nil
 	}
 	return append(lambdaFunctions, lambdaFn)
@@ -119,25 +119,20 @@ func appendSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) [
 
 func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	snsTopicName := sparta.CloudFormationResourceName("SNSDynamicTopic")
-	snsTopicDefinition := sparta.ArbitraryJSONObject{
-		"Type": "AWS::SNS::Topic",
-		"Properties": sparta.ArbitraryJSONObject{
-			"DisplayName": "Sparta Application SNS topic",
-		},
-	}
 	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSNSEvent, nil)
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.SNSPermission{
 		BasePermission: sparta.BasePermission{
-			SourceArn: sparta.ArbitraryJSONObject{"Ref": snsTopicName},
+			SourceArn: gocf.Ref(snsTopicName),
 		},
 	})
 
 	lambdaFn.Decorator = func(lambdaResourceName string,
-		lambdaResourceDefinition sparta.ArbitraryJSONObject,
-		resources sparta.ArbitraryJSONObject,
-		outputs sparta.ArbitraryJSONObject,
+		lambdaResource gocf.LambdaFunction,
+		template *gocf.Template,
 		logger *logrus.Logger) error {
-		resources[snsTopicName] = snsTopicDefinition
+		template.AddResource(snsTopicName, &gocf.SNSTopic{
+			DisplayName: gocf.String("Sparta Application SNS topic"),
+		})
 		return nil
 	}
 	return append(lambdaFunctions, lambdaFn)
@@ -170,11 +165,10 @@ func echoDynamoDBEvent(event *json.RawMessage, context *sparta.LambdaContext, w 
 
 func appendDynamoDBLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoDynamoDBEvent, nil)
-	lambdaFn.EventSourceMappings = append(lambdaFn.EventSourceMappings, &lambda.CreateEventSourceMappingInput{
-		EventSourceArn:   aws.String(dynamoTestStream),
-		StartingPosition: aws.String("TRIM_HORIZON"),
-		BatchSize:        aws.Int64(10),
-		Enabled:          aws.Bool(true),
+	lambdaFn.EventSourceMappings = append(lambdaFn.EventSourceMappings, &sparta.EventSourceMapping{
+		EventSourceArn:   dynamoTestStream,
+		StartingPosition: "TRIM_HORIZON",
+		BatchSize:        10,
 	})
 	return append(lambdaFunctions, lambdaFn)
 }
@@ -203,11 +197,10 @@ func echoKinesisEvent(event *json.RawMessage, context *sparta.LambdaContext, w h
 
 func appendKinesisLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoKinesisEvent, nil)
-	lambdaFn.EventSourceMappings = append(lambdaFn.EventSourceMappings, &lambda.CreateEventSourceMappingInput{
-		EventSourceArn:   aws.String(kinesisTestStream),
-		StartingPosition: aws.String("TRIM_HORIZON"),
-		BatchSize:        aws.Int64(100),
-		Enabled:          aws.Bool(true),
+	lambdaFn.EventSourceMappings = append(lambdaFn.EventSourceMappings, &sparta.EventSourceMapping{
+		EventSourceArn:   kinesisTestStream,
+		StartingPosition: "TRIM_HORIZON",
+		BatchSize:        100,
 	})
 	return append(lambdaFunctions, lambdaFn)
 }
@@ -215,27 +208,70 @@ func appendKinesisLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInf
 ////////////////////////////////////////////////////////////////////////////////
 // SES handler
 //
-func echoSESEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
+func echoSESEvent(event *json.RawMessage,
+	context *sparta.LambdaContext,
+	w http.ResponseWriter,
+	logger *logrus.Logger) {
+
 	logger.WithFields(logrus.Fields{
 		"RequestID": context.AWSRequestID,
 	}).Info("Request received")
 
-	var lambdaEvent spartaSES.Event
-	err := json.Unmarshal([]byte(*event), &lambdaEvent)
-	if err != nil {
-		logger.Error("Failed to unmarshal event data: ", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	configuration, configErr := sparta.Discover()
 
-	for _, eachRecord := range lambdaEvent.Records {
-		logger.WithFields(logrus.Fields{
-			"Source":    eachRecord.SES.Mail.Source,
-			"MessageID": eachRecord.SES.Mail.MessageID,
-		}).Info("SES Event")
+	logger.WithFields(logrus.Fields{
+		"Error":         configErr,
+		"Configuration": configuration,
+	}).Info("Discovery results")
+
+	// The bucket is in the configuration map, prefixed by
+	// SESMessageStoreBucket
+	messageBodyInfo := make(map[string]interface{}, 0)
+	bucketName := ""
+	if nil != configuration {
+		for eachKey, eachValue := range configuration {
+			if strings.HasPrefix(eachKey, "SESMessageStoreBucket") {
+				messageBodyInfo["Bucket"] = eachValue
+				bucketInfo, ok := eachValue.(map[string]interface{})
+				if ok {
+					bucketName, _ = bucketInfo["Ref"].(string)
+				}
+			}
+		}
+
+		var lambdaEvent spartaSES.Event
+		err := json.Unmarshal([]byte(*event), &lambdaEvent)
+		if err != nil {
+			logger.Error("Failed to unmarshal event data: ", err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+
+		// Get the metdata about the item...
+		svc := s3.New(session.New())
+		for _, eachRecord := range lambdaEvent.Records {
+			logger.WithFields(logrus.Fields{
+				"Source":     eachRecord.SES.Mail.Source,
+				"MessageID":  eachRecord.SES.Mail.MessageID,
+				"S3BodyInfo": messageBodyInfo,
+			}).Info("SES Event")
+
+			if "" != bucketName {
+				params := &s3.HeadObjectInput{
+					Bucket: aws.String(bucketName),
+					Key:    aws.String(eachRecord.SES.Mail.MessageID),
+				}
+				resp, err := svc.HeadObject(params)
+				logger.WithFields(logrus.Fields{
+					"Error":    err,
+					"Metadata": resp,
+				}).Info("SES MessageBody")
+			}
+		}
 	}
 }
 
-func appendSESLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+func appendSESLambda(api *sparta.API,
+	lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 
 	// Setup options s.t. the lambda function has time to consume the message body
 	sesItemInfoOptions := &sparta.LambdaFunctionOptions{
@@ -254,33 +290,30 @@ func appendSESLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) [
 		},
 		InvocationType: "Event",
 	}
+	// Store the message body
 	bodyStorage, _ := sesPermission.NewMessageBodyStorageResource("Special")
 	sesPermission.MessageBodyStorage = bodyStorage
 
-	// Add some custom ReceiptRules.  Rules will be inserted in the order
-	// they're defined here.
 	sesPermission.ReceiptRules = make([]sparta.ReceiptRule, 0)
-
-	specialReceiptRule := sparta.ReceiptRule{
+	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules, sparta.ReceiptRule{
 		Name:       "Special",
 		Recipients: []string{"sombody_special@gosparta.io"},
 		TLSPolicy:  "Optional",
-	}
+	})
+	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules, sparta.ReceiptRule{
+		Name:       "Default",
+		Recipients: []string{},
+		TLSPolicy:  "Optional",
+	})
 
-	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules, specialReceiptRule)
 	// Then add the privilege to the Lambda function s.t. we can actually get at the data
-	// lambdaFn.RoleDefinition.Privileges = append(lambdaFn.RoleDefinition.Privileges,
-	// 	sparta.IAMRolePrivilege{
-	// 		Actions:  []string{"s3:GetObject"},
-	// 		Resource: sesPermission.MessageBodyStorage.BucketArn(),
-	// 	})
-
-	sesPermission.ReceiptRules = append(sesPermission.ReceiptRules,
-		sparta.ReceiptRule{
-			Name:       "Default",
-			Recipients: []string{},
-			TLSPolicy:  "Optional",
+	lambdaFn.RoleDefinition.Privileges = append(lambdaFn.RoleDefinition.Privileges,
+		sparta.IAMRolePrivilege{
+			Actions:  []string{"s3:GetObject", "s3:HeadObject"},
+			Resource: sesPermission.MessageBodyStorage.BucketArnAllKeys(),
 		})
+
+	// Finally add the SES permission to the lambda function
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sesPermission)
 
 	return append(lambdaFunctions, lambdaFn)
@@ -309,6 +342,6 @@ func main() {
 	sparta.Main(stackName,
 		"Simple Sparta application",
 		spartaLambdaData(apiGateway),
-		nil,
+		apiGateway,
 		nil)
 }
