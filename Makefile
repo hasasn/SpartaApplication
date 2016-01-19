@@ -21,12 +21,17 @@ get: clean ensure_vendor
 	rm -rf ./src/main/vendor/github.com/mjibson/esc/.git
 	git clone --depth=1 https://github.com/mweagle/Sparta ./vendor/github.com/mweagle/Sparta
 	rm -rf ./src/main/vendor/github.com/mweagle/Sparta/.git
+	git clone --depth=1 https://github.com/mweagle/go-cloudformation ./vendor/github.com/mweagle/go-cloudformation
+	rm -rf ./src/main/vendor/github.com/mweagle/go-cloudformation/.git
 
 test: build
 	GO15VENDOREXPERIMENT=1 go test ./test/...
 
 delete:
 	GO15VENDOREXPERIMENT=1 go run application.go delete
+
+explore:
+	go run application.go --level info explore
 
 provision:
 	GO15VENDOREXPERIMENT=1 go run application.go provision --s3Bucket $(S3_BUCKET)
