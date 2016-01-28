@@ -141,9 +141,28 @@ func appendSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) [
 	return append(lambdaFunctions, lambdaFn)
 }
 
+func echoDynamicSNSEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
+	logger.WithFields(logrus.Fields{
+		"RequestID": context.AWSRequestID,
+	}).Info("Request received")
+
+	var lambdaEvent spartaSNS.Event
+	err := json.Unmarshal([]byte(*event), &lambdaEvent)
+	if err != nil {
+		logger.Error("Failed to unmarshal event data: ", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	for _, eachRecord := range lambdaEvent.Records {
+		logger.WithFields(logrus.Fields{
+			"Subject": eachRecord.Sns.Subject,
+			"Message": eachRecord.Sns.Message,
+		}).Info("SNS Event")
+	}
+}
+
 func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	snsTopicName := sparta.CloudFormationResourceName("SNSDynamicTopic")
-	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoSNSEvent, nil)
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoDynamicSNSEvent, nil)
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.SNSPermission{
 		BasePermission: sparta.BasePermission{
 			SourceArn: gocf.Ref(snsTopicName),
@@ -344,6 +363,44 @@ func appendSESLambda(api *sparta.API,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// CloudWatchEvent handler
+//
+func echoCloudWatchEvent(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
+	logger.WithFields(logrus.Fields{
+		"RequestID": context.AWSRequestID,
+	}).Info("Request received")
+
+	config, _ := sparta.Discover()
+	logger.WithFields(logrus.Fields{
+		"RequestID":     context.AWSRequestID,
+		"Event":         string(*event),
+		"Configuration": config,
+	}).Info("Request received")
+	fmt.Fprintf(w, "Hello World!")
+}
+func appendCloudWatchEventHandler(api *sparta.API,
+	lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{},
+		echoCloudWatchEvent,
+		nil)
+	cloudWatchEventsPermission := sparta.CloudWatchEventsPermission{}
+	cloudWatchEventsPermission.Rules = make(map[string]sparta.CloudWatchEventsRule, 0)
+	cloudWatchEventsPermission.Rules["Rate5Mins"] = sparta.CloudWatchEventsRule{
+		ScheduleExpression: "rate(5 minutes)",
+	}
+	cloudWatchEventsPermission.Rules["EC2Activity"] = sparta.CloudWatchEventsRule{
+		EventPattern: map[string]interface{}{
+			"source":      []string{"aws.ec2"},
+			"detail-type": []string{"EC2 Instance State-change Notification"},
+		},
+	}
+	lambdaFn.Permissions = append(lambdaFn.Permissions, cloudWatchEventsPermission)
+
+	return append(lambdaFunctions, lambdaFn)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Return the *[]sparta.LambdaAWSInfo slice
 //
 func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
@@ -356,6 +413,7 @@ func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
 	lambdaFunctions = appendDynamoDBLambda(api, lambdaFunctions)
 	lambdaFunctions = appendKinesisLambda(api, lambdaFunctions)
 	lambdaFunctions = appendSESLambda(api, lambdaFunctions)
+	lambdaFunctions = appendCloudWatchEventHandler(api, lambdaFunctions)
 	return lambdaFunctions
 }
 
