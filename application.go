@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -261,54 +260,52 @@ func echoSESEvent(event *json.RawMessage,
 	}).Info("Request received")
 
 	configuration, configErr := sparta.Discover()
-
 	logger.WithFields(logrus.Fields{
 		"Error":         configErr,
 		"Configuration": configuration,
 	}).Info("Discovery results")
 
+	// The message bucket is an explicit `DependsOn` relationship, so it'll be in the
+	// resources map.  We'll find it by looking for the dependent resource with the "AWS::S3::Bucket" type
+	bucketName := ""
+	for _, eachResource := range configuration.Resources {
+		if eachResource.Properties[sparta.TagResourceType] == "AWS::S3::Bucket" {
+			bucketName = eachResource.Properties["Ref"]
+		}
+	}
+	if "" == bucketName {
+		logger.Error("Failed to discover SES bucket from sparta.Discovery")
+		http.Error(w, "Failed to discovery SES MessageBodyBucket", http.StatusInternalServerError)
+	}
 	// The bucket is in the configuration map, prefixed by
 	// SESMessageStoreBucket
-	messageBodyInfo := make(map[string]interface{}, 0)
-	bucketName := ""
-	if nil != configuration {
-		for eachKey, eachValue := range configuration {
-			if strings.HasPrefix(eachKey, "SESMessageStoreBucket") {
-				messageBodyInfo["Bucket"] = eachValue
-				bucketInfo, ok := eachValue.(map[string]interface{})
-				if ok {
-					bucketName, _ = bucketInfo["Ref"].(string)
-				}
+
+	var lambdaEvent spartaSES.Event
+	err := json.Unmarshal([]byte(*event), &lambdaEvent)
+	if err != nil {
+		logger.Error("Failed to unmarshal event data: ", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+	// Get the metdata about the item...
+	svc := s3.New(session.New())
+	for _, eachRecord := range lambdaEvent.Records {
+		logger.WithFields(logrus.Fields{
+			"Source":     eachRecord.SES.Mail.Source,
+			"MessageID":  eachRecord.SES.Mail.MessageID,
+			"BucketName": bucketName,
+		}).Info("SES Event")
+
+		if "" != bucketName {
+			params := &s3.HeadObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(eachRecord.SES.Mail.MessageID),
 			}
-		}
-
-		var lambdaEvent spartaSES.Event
-		err := json.Unmarshal([]byte(*event), &lambdaEvent)
-		if err != nil {
-			logger.Error("Failed to unmarshal event data: ", err.Error())
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-
-		// Get the metdata about the item...
-		svc := s3.New(session.New())
-		for _, eachRecord := range lambdaEvent.Records {
+			resp, err := svc.HeadObject(params)
 			logger.WithFields(logrus.Fields{
-				"Source":     eachRecord.SES.Mail.Source,
-				"MessageID":  eachRecord.SES.Mail.MessageID,
-				"S3BodyInfo": messageBodyInfo,
-			}).Info("SES Event")
-
-			if "" != bucketName {
-				params := &s3.HeadObjectInput{
-					Bucket: aws.String(bucketName),
-					Key:    aws.String(eachRecord.SES.Mail.MessageID),
-				}
-				resp, err := svc.HeadObject(params)
-				logger.WithFields(logrus.Fields{
-					"Error":    err,
-					"Metadata": resp,
-				}).Info("SES MessageBody")
-			}
+				"Error":    err,
+				"Metadata": resp,
+			}).Info("SES MessageBody")
 		}
 	}
 }
