@@ -397,7 +397,7 @@ func appendCloudWatchEventHandler(api *sparta.API,
 	cloudWatchEventsPermission.Rules["EC2Activity"] = sparta.CloudWatchEventsRule{
 		EventPattern: map[string]interface{}{
 			"source":      []string{"aws.ec2"},
-			"detail-type": []string{"EC2 Instance State-change Notification"},
+			"detail-type": []string{"EC2 Instance state change"},
 		},
 	}
 	lambdaFn.Permissions = append(lambdaFn.Permissions, cloudWatchEventsPermission)
