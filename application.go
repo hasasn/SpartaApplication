@@ -406,6 +406,32 @@ func appendCloudWatchEventHandler(api *sparta.API,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// CloudWatchEvent handler
+//
+func echoCloudWatchLogs(event *json.RawMessage, context *sparta.LambdaContext, w http.ResponseWriter, logger *logrus.Logger) {
+	logger.WithFields(logrus.Fields{
+		"RequestID": context.AWSRequestID,
+	}).Info("Request received")
+	fmt.Fprintf(w, "Hello World!")
+}
+
+func appendCloudWatchLogsHandler(api *sparta.API,
+	lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+
+	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{},
+		echoCloudWatchLogs,
+		nil)
+	cloudWatchLogsPermission := sparta.CloudWatchLogsPermission{}
+	cloudWatchLogsPermission.Filters = make(map[string]sparta.CloudWatchLogsSubscriptionFilter, 1)
+	cloudWatchLogsPermission.Filters["MyFilter"] = sparta.CloudWatchLogsSubscriptionFilter{
+		FilterPattern: "",
+		LogGroupName:  "/aws/lambda/versions",
+	}
+	lambdaFn.Permissions = append(lambdaFn.Permissions, cloudWatchLogsPermission)
+	return append(lambdaFunctions, lambdaFn)
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // Return the *[]sparta.LambdaAWSInfo slice
 //
 func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
@@ -419,12 +445,15 @@ func spartaLambdaData(api *sparta.API) []*sparta.LambdaAWSInfo {
 	lambdaFunctions = appendKinesisLambda(api, lambdaFunctions)
 	lambdaFunctions = appendSESLambda(api, lambdaFunctions)
 	lambdaFunctions = appendCloudWatchEventHandler(api, lambdaFunctions)
+	lambdaFunctions = appendCloudWatchLogsHandler(api, lambdaFunctions)
 	return lambdaFunctions
 }
 
 func main() {
 	stage := sparta.NewStage("prod")
 	apiGateway := sparta.NewAPIGateway("MySpartaAPI", stage)
+	apiGateway.CORSEnabled = true
+
 	stackName := "SpartaApplication"
 	sparta.Main(stackName,
 		"Simple Sparta application",
