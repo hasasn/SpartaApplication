@@ -97,10 +97,17 @@ func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.Lamb
 
 	lambdaFn.Decorator = func(lambdaResourceName string,
 		lambdaResource gocf.LambdaFunction,
+		resourceMetadata map[string]interface{},
 		template *gocf.Template,
 		logger *logrus.Logger) error {
 		cfResource := template.AddResource(s3BucketResourceName, &gocf.S3Bucket{
 			AccessControl: gocf.String("PublicRead"),
+			Tags: []gocf.ResourceTag{
+				gocf.ResourceTag{
+					Key:   gocf.String("SpecialKey"),
+					Value: gocf.String("SpecialValue"),
+				},
+			},
 		})
 		cfResource.DeletionPolicy = "Delete"
 		return nil
@@ -170,6 +177,7 @@ func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWS
 
 	lambdaFn.Decorator = func(lambdaResourceName string,
 		lambdaResource gocf.LambdaFunction,
+		resourceMetadata map[string]interface{},
 		template *gocf.Template,
 		logger *logrus.Logger) error {
 		template.AddResource(snsTopicName, &gocf.SNSTopic{
