@@ -95,9 +95,12 @@ func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.Lamb
 			Resource: spartaCF.S3AllKeysArnForBucket(gocf.Ref(s3BucketResourceName)),
 		})
 
-	lambdaFn.Decorator = func(lambdaResourceName string,
+	lambdaFn.Decorator = func(serviceName string,
+		lambdaResourceName string,
 		lambdaResource gocf.LambdaFunction,
 		resourceMetadata map[string]interface{},
+		S3Bucket string,
+		S3Key string,
 		template *gocf.Template,
 		logger *logrus.Logger) error {
 		cfResource := template.AddResource(s3BucketResourceName, &gocf.S3Bucket{
@@ -175,9 +178,12 @@ func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWS
 		},
 	})
 
-	lambdaFn.Decorator = func(lambdaResourceName string,
+	lambdaFn.Decorator = func(serviceName string,
+		lambdaResourceName string,
 		lambdaResource gocf.LambdaFunction,
 		resourceMetadata map[string]interface{},
+		S3Bucket string,
+		S3Key string,
 		template *gocf.Template,
 		logger *logrus.Logger) error {
 		template.AddResource(snsTopicName, &gocf.SNSTopic{
