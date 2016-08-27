@@ -1,40 +1,51 @@
 .DEFAULT_GOAL=build
 .PHONY: build test get run
 
-ensure_vendor:
-	mkdir -pv vendor
-
 clean:
-	rm -rf ./vendor
 	go clean .
 
-get: clean ensure_vendor
-	git clone --depth=1 https://github.com/aws/aws-sdk-go ./vendor/github.com/aws/aws-sdk-go
-	rm -rf ./src/main/vendor/github.com/aws/aws-sdk-go/.git
-	git clone --depth=1 https://github.com/vaughan0/go-ini ./vendor/github.com/vaughan0/go-ini
-	rm -rf ./src/main/vendor/github.com/vaughan0/go-ini/.git
-	git clone --depth=1 https://github.com/Sirupsen/logrus ./vendor/github.com/Sirupsen/logrus
-	rm -rf ./src/main/vendor/github.com/Sirupsen/logrus/.git
-	git clone --depth=1 https://github.com/voxelbrain/goptions ./vendor/github.com/voxelbrain/goptions
-	rm -rf ./src/main/vendor/github.com/voxelbrain/goptions/.git
-	git clone --depth=1 https://github.com/mjibson/esc ./vendor/github.com/mjibson/esc
-	rm -rf ./src/main/vendor/github.com/mjibson/esc/.git
-	git clone --depth=1 https://github.com/mweagle/Sparta ./vendor/github.com/mweagle/Sparta
-	rm -rf ./src/main/vendor/github.com/mweagle/Sparta/.git
-	git clone --depth=1 https://github.com/crewjam/go-cloudformation ./vendor/github.com/crewjam/go-cloudformation
-	rm -rf ./src/main/vendor/github.com/crewjam/go-cloudformation/.git
+get: clean
+	rm -rf $(GOPATH)/src/github.com/aws/aws-sdk-go
+	git clone --depth=1 https://github.com/aws/aws-sdk-go $(GOPATH)/src/github.com/aws/aws-sdk-go
 
+	rm -rf $(GOPATH)/src/github.com/go-ini/ini
+	git clone --depth=1 https://github.com/go-ini/ini $(GOPATH)/src/github.com/go-ini/ini
+
+	rm -rf $(GOPATH)/src/github.com/jmespath/go-jmespath
+	git clone --depth=1 https://github.com/jmespath/go-jmespath $(GOPATH)/src/github.com/jmespath/go-jmespath
+
+	rm -rf $(GOPATH)/src/github.com/Sirupsen/logrus
+	git clone --depth=1 https://github.com/Sirupsen/logrus $(GOPATH)/src/github.com/Sirupsen/logrus
+
+	rm -rf $(GOPATH)/src/github.com/mjibson/esc
+	git clone --depth=1 https://github.com/mjibson/esc $(GOPATH)/src/github.com/mjibson/esc
+
+	rm -rf $(GOPATH)/src/github.com/crewjam/go-cloudformation
+	git clone --depth=1 https://github.com/crewjam/go-cloudformation $(GOPATH)/src/github.com/crewjam/go-cloudformation
+
+	rm -rf $(GOPATH)/src/github.com/spf13/cobra
+	git clone --depth=1 https://github.com/spf13/cobra $(GOPATH)/src/github.com/spf13/cobra
+
+	rm -rf $(GOPATH)/src/github.com/spf13/pflag
+	git clone --depth=1 https://github.com/spf13/pflag $(GOPATH)/src/github.com/spf13/pflag
+
+	rm -rf $(GOPATH)/src/github.com/asaskevich/govalidator
+	git clone --depth=1 https://github.com/asaskevich/govalidator $(GOPATH)/src/github.com/asaskevich/govalidator
+	
+	rm -rf $(GOPATH)/src/github.com/fzipp/gocyclo
+	git clone --depth=1 https://github.com/fzipp/gocyclo $(GOPATH)/src/github.com/fzipp/gocyclo
+	
 test: build
-	GO15VENDOREXPERIMENT=1 go test ./test/...
+	go test ./test/...
 
 delete:
-	GO15VENDOREXPERIMENT=1 go run application.go delete
+	go run application.go delete
 
 explore:
 	go run application.go --level info explore
 
 provision:
-	GO15VENDOREXPERIMENT=1 go run application.go provision --s3Bucket $(S3_BUCKET)
+	go run application.go provision --s3Bucket $(S3_BUCKET)
 
 describe: build
-	GO15VENDOREXPERIMENT=1 S3_TEST_BUCKET="" SNS_TEST_TOPIC="" DYNAMO_TEST_STREAM="" go run application.go describe --out ./graph.html
+	KINESIS_TEST_STREAM="" S3_TEST_BUCKET="" SNS_TEST_TOPIC="" DYNAMO_TEST_STREAM="" go run application.go --level info describe --out ./graph.html
