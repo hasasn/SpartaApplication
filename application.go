@@ -49,7 +49,7 @@ func echoS3Event(event *json.RawMessage, context *sparta.LambdaContext, w http.R
 func appendS3Lambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	lambdaFn := sparta.NewLambda(sparta.IAMRoleDefinition{}, echoS3Event, nil)
 	apiGatewayResource, _ := api.NewResource("/hello/world/test", lambdaFn)
-	apiGatewayResource.NewMethod("GET")
+	apiGatewayResource.NewMethod("GET", http.StatusOK)
 
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.S3Permission{
 		BasePermission: sparta.BasePermission{
