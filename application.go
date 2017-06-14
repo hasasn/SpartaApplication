@@ -11,13 +11,13 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 
 	"github.com/Sirupsen/logrus"
-	gocf "github.com/crewjam/go-cloudformation"
 	sparta "github.com/mweagle/Sparta"
 	spartaCF "github.com/mweagle/Sparta/aws/cloudformation"
 	spartaDynamoDB "github.com/mweagle/Sparta/aws/dynamodb"
 	spartaKinesis "github.com/mweagle/Sparta/aws/kinesis"
 	spartaSES "github.com/mweagle/Sparta/aws/ses"
 	spartaSNS "github.com/mweagle/Sparta/aws/sns"
+	gocf "github.com/mweagle/go-cloudformation"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -107,11 +107,10 @@ func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.Lamb
 		logger *logrus.Logger) error {
 		cfResource := template.AddResource(s3BucketResourceName, &gocf.S3Bucket{
 			AccessControl: gocf.String("PublicRead"),
-			Tags: []gocf.ResourceTag{
-				gocf.ResourceTag{
-					Key:   gocf.String("SpecialKey"),
-					Value: gocf.String("SpecialValue"),
-				},
+			Tags: &gocf.TagList{gocf.Tag{
+				Key:   gocf.String("SpecialKey"),
+				Value: gocf.String("SpecialValue"),
+			},
 			},
 		})
 		cfResource.DeletionPolicy = "Delete"

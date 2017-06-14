@@ -31,10 +31,10 @@ get: clean
 
 	rm -rf $(GOPATH)/src/github.com/asaskevich/govalidator
 	git clone --depth=1 https://github.com/asaskevich/govalidator $(GOPATH)/src/github.com/asaskevich/govalidator
-	
+
 	rm -rf $(GOPATH)/src/github.com/fzipp/gocyclo
 	git clone --depth=1 https://github.com/fzipp/gocyclo $(GOPATH)/src/github.com/fzipp/gocyclo
-	
+
 test: build
 	go test ./test/...
 
@@ -48,4 +48,4 @@ provision:
 	go run application.go provision --s3Bucket $(S3_BUCKET)
 
 describe: build
-	KINESIS_TEST_STREAM="" S3_TEST_BUCKET="" SNS_TEST_TOPIC="" DYNAMO_TEST_STREAM="" go run application.go --level info describe --out ./graph.html
+	KINESIS_TEST_STREAM="" S3_TEST_BUCKET="" SNS_TEST_TOPIC="" DYNAMO_TEST_STREAM="" go run application.go --level info describe --s3Bucket $(S3_BUCKET) --out ./graph.html
