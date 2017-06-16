@@ -463,7 +463,7 @@ func main() {
 	apiGateway := sparta.NewAPIGateway("MySpartaAPI", stage)
 	apiGateway.CORSEnabled = true
 
-	stackName := "SpartaApplication"
+	stackName := spartaCF.UserScopedStackName("SpartaApplication")
 	sparta.Main(stackName,
 		"Simple Sparta application",
 		spartaLambdaData(apiGateway),
