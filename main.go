@@ -1,23 +1,19 @@
 package main
 
 import (
-	"encoding/json"
-	"io/ioutil"
+	"context"
 	"net/http"
 	"os"
 
+	awsLambdaEvents "github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-
-	"github.com/Sirupsen/logrus"
 	sparta "github.com/mweagle/Sparta"
 	spartaCF "github.com/mweagle/Sparta/aws/cloudformation"
-	spartaDynamoDB "github.com/mweagle/Sparta/aws/dynamodb"
-	spartaKinesis "github.com/mweagle/Sparta/aws/kinesis"
-	spartaSES "github.com/mweagle/Sparta/aws/ses"
-	spartaSNS "github.com/mweagle/Sparta/aws/sns"
 	gocf "github.com/mweagle/go-cloudformation"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -37,30 +33,17 @@ var kinesisTestStream = paramVal("SPARTA_KINESIS_TEST_STREAM", "arn:aws:kinesis:
 ////////////////////////////////////////////////////////////////////////////////
 // S3 handler
 //
-func echoS3Event(w http.ResponseWriter, r *http.Request) {
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
-
-	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
-	var jsonMessage json.RawMessage
-	err := decoder.Decode(&jsonMessage)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+func echoS3Event(ctx context.Context, s3Event awsLambdaEvents.S3Event) (*awsLambdaEvents.S3Event, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 	logger.WithFields(logrus.Fields{
-		"RequestID": lambdaContext.AWSRequestID,
-		"Event":     string(jsonMessage),
-	}).Info("Request received")
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonMessage)
+		"Event": s3Event,
+	}).Info("Event received")
+	return &s3Event, nil
 }
 
 func appendS3Lambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoS3Event),
-		http.HandlerFunc(echoS3Event),
+		echoS3Event,
 		sparta.IAMRoleDefinition{})
 	apiGatewayResource, _ := api.NewResource("/hello/world/test", lambdaFn)
 	apiGatewayResource.NewMethod("GET", http.StatusOK)
@@ -74,27 +57,24 @@ func appendS3Lambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []
 	return append(lambdaFunctions, lambdaFn)
 }
 
-func echoS3DynamicBucketEvent(w http.ResponseWriter, r *http.Request) {
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
-	eventData, _ := ioutil.ReadAll(r.Body)
-	defer r.Body.Close()
-	config, _ := sparta.Discover()
+func echoS3DynamicBucketEvent(ctx context.Context, s3Event awsLambdaEvents.S3Event) (*awsLambdaEvents.S3Event, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 	logger.WithFields(logrus.Fields{
-		"RequestID":     lambdaContext.AWSRequestID,
-		"Event":         string(eventData),
-		"Configuration": config,
-	}).Info("Request received")
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(eventData)
+		"Event": s3Event,
+	}).Info("Event received")
+	return &s3Event, nil
 }
 
 func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
+	svc := s3.New(session.New())
+	svc.GetObject(&s3.GetObjectInput{
+		Bucket: aws.String("hello"),
+		Key:    aws.String("world"),
+	})
 
 	s3BucketResourceName := sparta.CloudFormationResourceName("S3DynamicBucket")
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoS3DynamicBucketEvent),
-		http.HandlerFunc(echoS3DynamicBucketEvent),
+		echoS3DynamicBucketEvent,
 		sparta.IAMRoleDefinition{})
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.S3Permission{
 		BasePermission: sparta.BasePermission{
@@ -138,33 +118,17 @@ func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.Lamb
 ////////////////////////////////////////////////////////////////////////////////
 // SNS handler
 //
-func echoSNSEvent(w http.ResponseWriter, r *http.Request) {
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
-
+func echoSNSEvent(ctx context.Context, snsEvent awsLambdaEvents.SNSEvent) (*awsLambdaEvents.SNSEvent, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 	logger.WithFields(logrus.Fields{
-		"RequestID": lambdaContext.AWSRequestID,
-	}).Info("Request received")
-
-	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
-	var lambdaEvent spartaSNS.Event
-	err := decoder.Decode(&lambdaEvent)
-	if err != nil {
-		logger.Error("Failed to unmarshal event data: ", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-	for _, eachRecord := range lambdaEvent.Records {
-		logger.WithFields(logrus.Fields{
-			"Subject": eachRecord.Sns.Subject,
-			"Message": eachRecord.Sns.Message,
-		}).Info("SNS Event")
-	}
+		"Event": snsEvent,
+	}).Info("Event received")
+	return &snsEvent, nil
 }
 
 func appendSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoSNSEvent),
-		http.HandlerFunc(echoSNSEvent),
+		echoSNSEvent,
 		sparta.IAMRoleDefinition{})
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.SNSPermission{
 		BasePermission: sparta.BasePermission{
@@ -174,41 +138,24 @@ func appendSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) [
 	return append(lambdaFunctions, lambdaFn)
 }
 
-func echoDynamicSNSEvent(w http.ResponseWriter, r *http.Request) {
-
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
+func echoDynamicSNSEvent(ctx context.Context, snsEvent awsLambdaEvents.SNSEvent) (*awsLambdaEvents.SNSEvent, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 	logger.WithFields(logrus.Fields{
-		"RequestID": lambdaContext.AWSRequestID,
-	}).Info("Request received")
-
-	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
-	var lambdaEvent spartaSNS.Event
-	err := decoder.Decode(&lambdaEvent)
-	if err != nil {
-		logger.Error("Failed to unmarshal event data: ", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-	for _, eachRecord := range lambdaEvent.Records {
-		logger.WithFields(logrus.Fields{
-			"Subject": eachRecord.Sns.Subject,
-			"Message": eachRecord.Sns.Message,
-		}).Info("SNS Event")
-	}
+		"Event": snsEvent,
+	}).Info("Event received")
+	return &snsEvent, nil
 }
 
 func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	snsTopicName := sparta.CloudFormationResourceName("SNSDynamicTopic")
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoDynamicSNSEvent),
-		http.HandlerFunc(echoDynamicSNSEvent),
+		echoDynamicSNSEvent,
 		sparta.IAMRoleDefinition{})
 	lambdaFn.Permissions = append(lambdaFn.Permissions, sparta.SNSPermission{
 		BasePermission: sparta.BasePermission{
 			SourceArn: gocf.Ref(snsTopicName),
 		},
 	})
-
 	lambdaFn.Decorator = func(serviceName string,
 		lambdaResourceName string,
 		lambdaResource gocf.LambdaFunction,
@@ -230,39 +177,17 @@ func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWS
 ////////////////////////////////////////////////////////////////////////////////
 // DynamoDB handler
 //
-func echoDynamoDBEvent(w http.ResponseWriter, r *http.Request) {
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
+func echoDynamoDBEvent(ctx context.Context, ddbEvent awsLambdaEvents.DynamoDBEvent) (*awsLambdaEvents.DynamoDBEvent, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 	logger.WithFields(logrus.Fields{
-		"RequestID": lambdaContext.AWSRequestID,
-	}).Info("Request received")
-
-	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
-	var lambdaEvent spartaDynamoDB.Event
-	err := decoder.Decode(&lambdaEvent)
-	if err != nil {
-		logger.Error("Failed to unmarshal event data: ", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-	for _, eachRecord := range lambdaEvent.Records {
-		logger.WithFields(logrus.Fields{
-			"Keys":     eachRecord.DynamoDB.Keys,
-			"NewImage": eachRecord.DynamoDB.NewImage,
-		}).Info("DynamoDb Event")
-	}
-	bytes, bytesErr := json.Marshal(&lambdaEvent)
-	if bytes != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(bytes)
-	} else {
-		http.Error(w, bytesErr.Error(), http.StatusInternalServerError)
-	}
+		"Event": ddbEvent,
+	}).Info("Event received")
+	return &ddbEvent, nil
 }
 
 func appendDynamoDBLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoDynamoDBEvent),
-		http.HandlerFunc(echoDynamoDBEvent),
+		echoDynamoDBEvent,
 		sparta.IAMRoleDefinition{})
 	lambdaFn.EventSourceMappings = append(lambdaFn.EventSourceMappings, &sparta.EventSourceMapping{
 		EventSourceArn:   dynamoTestStream,
@@ -275,31 +200,17 @@ func appendDynamoDBLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSIn
 ////////////////////////////////////////////////////////////////////////////////
 // Kinesis handler
 //
-func echoKinesisEvent(w http.ResponseWriter, r *http.Request) {
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
+func echoKinesisEvent(ctx context.Context, kinesisEvent awsLambdaEvents.KinesisEvent) (*awsLambdaEvents.KinesisEvent, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 	logger.WithFields(logrus.Fields{
-		"RequestID": lambdaContext.AWSRequestID,
-	}).Info("Request received")
-
-	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
-	var lambdaEvent spartaKinesis.Event
-	err := decoder.Decode(&lambdaEvent)
-	if err != nil {
-		logger.Error("Failed to unmarshal event data: ", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-	for _, eachRecord := range lambdaEvent.Records {
-		logger.WithFields(logrus.Fields{
-			"EventID": eachRecord.EventID,
-		}).Info("Kinesis Event")
-	}
+		"Event": kinesisEvent,
+	}).Info("Event received")
+	return &kinesisEvent, nil
 }
 
 func appendKinesisLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoKinesisEvent),
-		http.HandlerFunc(echoKinesisEvent),
+		echoKinesisEvent,
 		sparta.IAMRoleDefinition{})
 	lambdaFn.EventSourceMappings = append(lambdaFn.EventSourceMappings, &sparta.EventSourceMapping{
 		EventSourceArn:   kinesisTestStream,
@@ -312,13 +223,8 @@ func appendKinesisLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInf
 ////////////////////////////////////////////////////////////////////////////////
 // SES handler
 //
-func echoSESEvent(w http.ResponseWriter, r *http.Request) {
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
-	logger.WithFields(logrus.Fields{
-		"RequestID": lambdaContext.AWSRequestID,
-	}).Info("Request received")
-
+func echoSESEvent(ctx context.Context, sesEvent map[string]interface{}) (map[string]interface{}, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 	configuration, configErr := sparta.Discover()
 	logger.WithFields(logrus.Fields{
 		"Error":         configErr,
@@ -328,48 +234,15 @@ func echoSESEvent(w http.ResponseWriter, r *http.Request) {
 	// The message bucket is an explicit `DependsOn` relationship, so it'll be in the
 	// resources map.  We'll find it by looking for the dependent resource with the "AWS::S3::Bucket" type
 	bucketName := ""
-	for _, eachResource := range configuration.Resources {
-		if eachResource.Properties[sparta.TagResourceType] == "AWS::S3::Bucket" {
-			bucketName = eachResource.Properties["Ref"]
+	for _, eachResourceInfo := range configuration.Resources {
+		if eachResourceInfo.ResourceType == "AWS::S3::Bucket" {
+			bucketName = eachResourceInfo.Properties["Ref"]
 		}
 	}
 	if "" == bucketName {
-		logger.Error("Failed to discover SES bucket from sparta.Discovery")
-		http.Error(w, "Failed to discovery SES MessageBodyBucket", http.StatusInternalServerError)
+		return nil, errors.Errorf("Failed to discover SES bucket from sparta.Discovery: %#v", configuration)
 	}
-	// The bucket is in the configuration map, prefixed by
-	// SESMessageStoreBucket
-
-	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
-	var lambdaEvent spartaSES.Event
-	err := decoder.Decode(&lambdaEvent)
-	if err != nil {
-		logger.Error("Failed to unmarshal event data: ", err.Error())
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-
-	// Get the metdata about the item...
-	svc := s3.New(session.New())
-	for _, eachRecord := range lambdaEvent.Records {
-		logger.WithFields(logrus.Fields{
-			"Source":     eachRecord.SES.Mail.Source,
-			"MessageID":  eachRecord.SES.Mail.MessageID,
-			"BucketName": bucketName,
-		}).Info("SES Event")
-
-		if "" != bucketName {
-			params := &s3.HeadObjectInput{
-				Bucket: aws.String(bucketName),
-				Key:    aws.String(eachRecord.SES.Mail.MessageID),
-			}
-			resp, err := svc.HeadObject(params)
-			logger.WithFields(logrus.Fields{
-				"Error":    err,
-				"Metadata": resp,
-			}).Info("SES MessageBody")
-		}
-	}
+	return sesEvent, nil
 }
 
 func appendSESLambda(api *sparta.API,
@@ -378,7 +251,7 @@ func appendSESLambda(api *sparta.API,
 	// Our lambda function will need to be able to read from the bucket, which
 	// will be handled by the S3MessageBodyBucketDecorator below
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoSESEvent),
-		http.HandlerFunc(echoSESEvent),
+		echoSESEvent,
 		sparta.IAMRoleDefinition{})
 	// Setup options s.t. the lambda function has time to consume the message body
 	lambdaFn.Options = &sparta.LambdaFunctionOptions{
@@ -426,26 +299,19 @@ func appendSESLambda(api *sparta.API,
 ////////////////////////////////////////////////////////////////////////////////
 // CloudWatchEvent handler
 //
-func echoCloudWatchEvent(w http.ResponseWriter, r *http.Request) {
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
-	logger.WithFields(logrus.Fields{
-		"RequestID": lambdaContext.AWSRequestID,
-	}).Info("Request received")
+func echoCloudWatchEvent(ctx context.Context, event map[string]interface{}) (map[string]interface{}, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 
-	config, _ := sparta.Discover()
 	logger.WithFields(logrus.Fields{
-		"RequestID":     lambdaContext.AWSRequestID,
-		"Configuration": config,
+		"Event": event,
 	}).Info("Request received")
-
-	w.Write([]byte("CloudWatch event received!"))
+	return event, nil
 }
 func appendCloudWatchEventHandler(api *sparta.API,
 	lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoCloudWatchEvent),
-		http.HandlerFunc(echoCloudWatchEvent),
+		echoCloudWatchEvent,
 		sparta.IAMRoleDefinition{})
 
 	cloudWatchEventsPermission := sparta.CloudWatchEventsPermission{}
@@ -466,21 +332,20 @@ func appendCloudWatchEventHandler(api *sparta.API,
 ////////////////////////////////////////////////////////////////////////////////
 // CloudWatchEvent handler
 //
-func echoCloudWatchLogsEvent(w http.ResponseWriter, r *http.Request) {
-	logger, _ := r.Context().Value(sparta.ContextKeyLogger).(*logrus.Logger)
-	lambdaContext, _ := r.Context().Value(sparta.ContextKeyLambdaContext).(*sparta.LambdaContext)
-	logger.WithFields(logrus.Fields{
-		"RequestID": lambdaContext.AWSRequestID,
-	}).Info("Request received")
+func echoCloudWatchLogsEvent(ctx context.Context, cwlEvent awsLambdaEvents.CloudwatchLogsEvent) (*awsLambdaEvents.CloudwatchLogsEvent, error) {
+	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 
-	w.Write([]byte("CloudWatch event received!"))
+	logger.WithFields(logrus.Fields{
+		"Event": cwlEvent,
+	}).Info("Request received")
+	return &cwlEvent, nil
 }
 
 func appendCloudWatchLogsHandler(api *sparta.API,
 	lambdaFunctions []*sparta.LambdaAWSInfo) []*sparta.LambdaAWSInfo {
 
 	lambdaFn := sparta.HandleAWSLambda(sparta.LambdaName(echoCloudWatchLogsEvent),
-		http.HandlerFunc(echoCloudWatchLogsEvent),
+		echoCloudWatchLogsEvent,
 		sparta.IAMRoleDefinition{})
 	cloudWatchLogsPermission := sparta.CloudWatchLogsPermission{}
 	cloudWatchLogsPermission.Filters = make(map[string]sparta.CloudWatchLogsSubscriptionFilter, 1)
@@ -514,7 +379,11 @@ func main() {
 	apiGateway := sparta.NewAPIGateway("MySpartaAPI", stage)
 	apiGateway.CORSEnabled = true
 
-	stackName := spartaCF.UserScopedStackName("SpartaApplication")
+	awsSession := session.New()
+	stackName, stackNameErr := spartaCF.UserAccountScopedStackName("SpartaApplication", awsSession)
+	if stackNameErr != nil {
+		os.Exit(1)
+	}
 	sparta.Main(stackName,
 		"Simple Sparta application",
 		spartaLambdaData(apiGateway),
