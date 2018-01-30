@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	sparta "github.com/mweagle/Sparta"
 	spartaCF "github.com/mweagle/Sparta/aws/cloudformation"
+	spartaSES "github.com/mweagle/Sparta/aws/ses"
 	gocf "github.com/mweagle/go-cloudformation"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -57,10 +58,14 @@ func appendS3Lambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInfo) []
 	return append(lambdaFunctions, lambdaFn)
 }
 
-func echoS3DynamicBucketEvent(ctx context.Context, s3Event awsLambdaEvents.S3Event) (*awsLambdaEvents.S3Event, error) {
+func echoS3DynamicBucketEvent(ctx context.Context,
+	s3Event awsLambdaEvents.S3Event) (*awsLambdaEvents.S3Event, error) {
 	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
+	discoveryInfo, discoveryInfoErr := sparta.Discover()
 	logger.WithFields(logrus.Fields{
-		"Event": s3Event,
+		"Event":        s3Event,
+		"Discovery":    discoveryInfo,
+		"DiscoveryErr": discoveryInfoErr,
 	}).Info("Event received")
 	return &s3Event, nil
 }
@@ -91,7 +96,7 @@ func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.Lamb
 			Resource: spartaCF.S3AllKeysArnForBucket(gocf.Ref(s3BucketResourceName)),
 		})
 
-	lambdaFn.Decorator = func(serviceName string,
+	s3Decorator := func(serviceName string,
 		lambdaResourceName string,
 		lambdaResource gocf.LambdaFunction,
 		resourceMetadata map[string]interface{},
@@ -111,6 +116,9 @@ func appendDynamicS3BucketLambda(api *sparta.API, lambdaFunctions []*sparta.Lamb
 		})
 		cfResource.DeletionPolicy = "Delete"
 		return nil
+	}
+	lambdaFn.Decorators = []sparta.TemplateDecoratorHandler{
+		sparta.TemplateDecoratorHookFunc(s3Decorator),
 	}
 	return append(lambdaFunctions, lambdaFn)
 }
@@ -156,7 +164,7 @@ func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWS
 			SourceArn: gocf.Ref(snsTopicName),
 		},
 	})
-	lambdaFn.Decorator = func(serviceName string,
+	snsDecorator := func(serviceName string,
 		lambdaResourceName string,
 		lambdaResource gocf.LambdaFunction,
 		resourceMetadata map[string]interface{},
@@ -170,6 +178,9 @@ func appendDynamicSNSLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWS
 			DisplayName: gocf.String("Sparta Application SNS topic"),
 		})
 		return nil
+	}
+	lambdaFn.Decorators = []sparta.TemplateDecoratorHandler{
+		sparta.TemplateDecoratorHookFunc(snsDecorator),
 	}
 	return append(lambdaFunctions, lambdaFn)
 }
@@ -223,7 +234,7 @@ func appendKinesisLambda(api *sparta.API, lambdaFunctions []*sparta.LambdaAWSInf
 ////////////////////////////////////////////////////////////////////////////////
 // SES handler
 //
-func echoSESEvent(ctx context.Context, sesEvent map[string]interface{}) (map[string]interface{}, error) {
+func echoSESEvent(ctx context.Context, sesEvent spartaSES.Event) (*spartaSES.Event, error) {
 	logger, _ := ctx.Value(sparta.ContextKeyRequestLogger).(*logrus.Entry)
 	configuration, configErr := sparta.Discover()
 	logger.WithFields(logrus.Fields{
@@ -242,7 +253,28 @@ func echoSESEvent(ctx context.Context, sesEvent map[string]interface{}) (map[str
 	if "" == bucketName {
 		return nil, errors.Errorf("Failed to discover SES bucket from sparta.Discovery: %#v", configuration)
 	}
-	return sesEvent, nil
+	// Get the metdata about the item...
+	svc := s3.New(session.New())
+	for _, eachRecord := range sesEvent.Records {
+		logger.WithFields(logrus.Fields{
+			"Source":     eachRecord.SES.Mail.Source,
+			"MessageID":  eachRecord.SES.Mail.MessageID,
+			"BucketName": bucketName,
+		}).Info("SES Event")
+
+		if "" != bucketName {
+			params := &s3.HeadObjectInput{
+				Bucket: aws.String(bucketName),
+				Key:    aws.String(eachRecord.SES.Mail.MessageID),
+			}
+			resp, err := svc.HeadObject(params)
+			logger.WithFields(logrus.Fields{
+				"Error":    err,
+				"Metadata": resp,
+			}).Info("SES MessageBody")
+		}
+	}
+	return &sesEvent, nil
 }
 
 func appendSESLambda(api *sparta.API,
